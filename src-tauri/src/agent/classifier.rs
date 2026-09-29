@@ -132,6 +132,23 @@ pub fn tool_summary(name: &str, result: &str) -> String {
             }
             return "抓取网页".into();
         }
+        "command_status" => {
+            // 后台任务状态行：状态：运行中 / 已完成 / 已失败 / 已终止
+            if let Some(pos) = result.find("状态：") {
+                let rest = &result[pos + "状态：".len()..];
+                let line = rest.lines().next().unwrap_or("").trim();
+                if !line.is_empty() {
+                    return line.to_string();
+                }
+            }
+            return "后台任务状态".into();
+        }
+        "command_kill" => {
+            if result.contains("已终止") {
+                return "已终止后台任务".into();
+            }
+            return "终止后台任务".into();
+        }
         _ => {}
     }
 

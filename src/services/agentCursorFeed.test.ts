@@ -232,6 +232,55 @@ describe("agentCursorFeed", () => {
     })).toBe("$ npm test · 超时");
   });
 
+  it("labels background run_command and skips its timeout budget", () => {
+    expect(formatCursorActionLabel({
+      id: "1",
+      name: "run_command",
+      icon: "▶️",
+      title: "执行命令",
+      detail: "npm test",
+      label: "$ npm test",
+      summary: "",
+      running: true,
+      args: { command: "npm test", background: true },
+    })).toBe("$ npm test · 后台");
+    // 后台任务无前台超时预算
+    expect(resolveToolTimeoutMs("run_command", { background: true })).toBeNull();
+    expect(
+      formatRunningToolElapsedLabel({
+        name: "run_command",
+        args: { command: "npm test", background: true },
+        startTs: 1000,
+        now: 1000 + 12_000,
+      }),
+    ).toBe("执行中 · 12s");
+  });
+
+  it("labels command_status and command_kill rows", () => {
+    expect(formatCursorActionLabel({
+      id: "2",
+      name: "command_status",
+      icon: "⏱️",
+      title: "后台任务状态",
+      detail: "job-abc",
+      label: "后台状态 job-abc",
+      summary: "运行中",
+      ok: true,
+      args: { id: "job-abc" },
+    })).toBe("job-abc · 运行中");
+    expect(formatCursorActionLabel({
+      id: "3",
+      name: "command_kill",
+      icon: "⏹️",
+      title: "终止后台任务",
+      detail: "job-abc",
+      label: "终止任务 job-abc",
+      summary: "已终止后台任务",
+      ok: true,
+      args: { id: "job-abc" },
+    })).toBe("Killed job-abc");
+  });
+
   it("builds thought then action sequence", () => {
     const groups: AgentRoundGroupView[] = [{
       turn: 1,

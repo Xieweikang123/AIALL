@@ -443,7 +443,8 @@ export function formatCursorActionLabel(step: AgentRoundTool): string {
 
   if (step.name === "run_command") {
     const { preview } = formatRunCommandLabel(step.args, step.detail);
-    const display = `$ ${preview}`;
+    const background = step.args?.background === true;
+    const display = background ? `$ ${preview} · 后台` : `$ ${preview}`;
     if (running) return display;
     if (failed) {
       const timedOut =
@@ -451,6 +452,23 @@ export function formatCursorActionLabel(step: AgentRoundTool): string {
       return timedOut ? `${display} · 超时` : `${display} · 失败`;
     }
     return display;
+  }
+
+  if (step.name === "command_status") {
+    const id = String(step.args?.id ?? step.detail ?? "").trim();
+    const target = id || "job";
+    if (running) return `Checking ${target}`;
+    if (failed) return `Status failed ${target}`;
+    const summary = step.summary?.trim();
+    return summary ? `${target} · ${summary}` : `Checked ${target}`;
+  }
+
+  if (step.name === "command_kill") {
+    const id = String(step.args?.id ?? step.detail ?? "").trim();
+    const target = id || "job";
+    if (running) return `Killing ${target}`;
+    if (failed) return `Kill failed ${target}`;
+    return `Killed ${target}`;
   }
 
   const fallback = step.title || step.label || step.name;
@@ -470,6 +488,8 @@ export function resolveToolTimeoutMs(
   args?: Record<string, unknown>,
 ): number | null {
   if (name !== "run_command") return null;
+  // Background commands have no foreground timeout budget.
+  if (args?.background === true) return null;
   const raw = args?.timeout_ms;
   const parsed =
     typeof raw === "number"

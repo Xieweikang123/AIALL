@@ -170,6 +170,21 @@ pub async fn execute_tool(
             let (ok, msg) = exec_run_command(ctx.project_path, args, ctx.mode).await;
             (ok, msg, None)
         }
+        "command_status" => {
+            let (ok, msg) = super::background_jobs::exec_command_status(args);
+            (ok, msg, None)
+        }
+        "command_kill" => {
+            if let Some(msg) = block_write(ctx.mode, "终止后台任务") {
+                return ToolExecOutcome {
+                    ok: false,
+                    message: msg,
+                    file_diff: None,
+                };
+            }
+            let (ok, msg) = super::background_jobs::exec_command_kill(args);
+            (ok, msg, None)
+        }
         "web_search" => {
             let (ok, msg) = exec_web_search(args, ctx.web_proxy_url).await;
             (ok, msg, None)
@@ -242,6 +257,8 @@ pub async fn execute_parallelizable_tool(
         "run_command" => exec_run_command(project_path, args, mode).await,
         "web_search" => exec_web_search(args, web_proxy_url).await,
         "web_extract" => exec_web_extract(args, web_proxy_url).await,
+        "command_status" => super::background_jobs::exec_command_status(args),
+        "command_kill" => super::background_jobs::exec_command_kill(args),
         "search_sessions" => {
             let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
             if query.trim().is_empty() {
@@ -814,7 +831,7 @@ fn server_mode_command_blocked(command: &str) -> Option<&'static str> {
 
 /// Kill the shell and its descendants so hung pipelines (e.g. `| tail`) do not
 /// leave orphans that keep stdout pipes open past the timeout.
-fn kill_command_process_tree(pid: u32) {
+pub(crate) fn kill_command_process_tree(pid: u32) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -866,6 +883,22 @@ async fn exec_run_command(project_path: &str, args: &Value, mode: &str) -> (bool
         if let Some(reason) = server_mode_command_blocked(command) {
             return (false, format!("错误：服务器模式禁止执行该命令（{reason}）"));
         }
+    }
+    if args
+        .get("background")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        return match super::background_jobs::start_background_job(project_path, command) {
+            Ok((id, log_path)) => (
+                true,
+                format!(
+                    "已在后台启动任务 {id}。\n命令：{command}\n日志：{log_path}\n\
+请勿忙等；稍后用 command_status（id={id}）查看进度与日志尾部，必要时 command_kill（id={id}）终止。"
+                ),
+            ),
+            Err(e) => (false, e),
+        };
     }
     let timeout_ms = args
         .get("timeout_ms")

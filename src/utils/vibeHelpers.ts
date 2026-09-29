@@ -420,6 +420,16 @@ export function formatToolMeta(
     const detail = path || "项目根目录";
     return { name, icon: "📁", title: "浏览目录", detail, label: `浏览目录 ${detail}` };
   }
+  if (name === "command_status") {
+    const id = String(args.id ?? "").trim();
+    const detail = id || "";
+    return { name, icon: "⏱️", title: "后台任务状态", detail, label: detail ? `后台状态 ${detail}` : "后台任务状态" };
+  }
+  if (name === "command_kill") {
+    const id = String(args.id ?? "").trim();
+    const detail = id || "";
+    return { name, icon: "⏹️", title: "终止后台任务", detail, label: detail ? `终止任务 ${detail}` : "终止后台任务" };
+  }
   if (name === "grep") {
     const detail = pattern ? `「${pattern}」` : "";
     return { name, icon: "🔍", title: "搜索代码", detail, label: detail ? `搜索代码 ${detail}` : "搜索代码" };
@@ -446,9 +456,10 @@ export function formatToolMeta(
   }
   if (name === "run_command") {
     const command = String(args.command ?? "").trim().replace(/\s+/g, " ");
-    const detail = command.length > 72 ? `${command.slice(0, 72)}…` : command;
-    const label = detail ? `$ ${detail}` : "执行命令";
-    return { name, icon: "▶️", title: "执行命令", detail, label };
+    const bg = args.background === true ? "（后台）" : "";
+    const detail = (command.length > 72 ? `${command.slice(0, 72)}…` : command) + bg;
+    const label = detail ? `$ ${detail}` : (bg ? "后台执行命令" : "执行命令");
+    return { name, icon: "▶️", title: bg ? "后台执行命令" : "执行命令", detail, label };
   }
 
   return { name, icon: "⚙️", title: name, detail: "", label: name };

@@ -152,6 +152,17 @@ pub async fn build_agent_system_prompt(
     if !shell_hint.is_empty() {
         system_prompt.push_str(&format!("\n{shell_hint}"));
     }
+    // 长任务后台化：只对可执行命令的模式（非只读）下发。
+    if !params.run_policy.read_only_build_run
+        && params.mode != "ask"
+        && params.mode != "explore"
+        && params.mode != "plan"
+    {
+        system_prompt.push_str(&format!(
+            "\n{}",
+            runtime_hint::build_background_command_hint()
+        ));
+    }
 
     if params.run_policy.automated_bug_fix_run {
         let verify_script = if params.runtime_profile.verify_scripts.is_empty() {

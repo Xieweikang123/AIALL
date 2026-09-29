@@ -147,14 +147,44 @@ pub fn agent_tool_definitions() -> Value {
         "type": "function",
         "function": {
           "name": "run_command",
-          "description": "在项目目录中执行 shell 命令。",
+          "description": "在项目目录中执行 shell 命令。长任务（测试/构建/安装）请设 background=true，立即返回任务 id，随后用 command_status 查状态、command_kill 终止。",
           "parameters": {
             "type": "object",
             "properties": {
               "command": { "type": "string", "description": "要执行的 shell 命令" },
-              "timeout_ms": { "type": "number", "description": "超时时间（毫秒），默认 30000，最大 120000" }
+              "timeout_ms": { "type": "number", "description": "前台执行超时时间（毫秒），默认 30000，最大 120000；background=true 时忽略" },
+              "background": { "type": "boolean", "description": "true=后台执行，立即返回任务 id，不阻塞；默认 false" }
             },
             "required": ["command"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "command_status",
+          "description": "查询 run_command 后台任务的状态与日志尾部（运行中/已完成/已失败）。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "description": "run_command 后台返回的任务 id（job-xxxx）" },
+              "tail_lines": { "type": "number", "description": "返回日志最后 N 行，默认 40，最大 200" }
+            },
+            "required": ["id"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "command_kill",
+          "description": "终止 run_command 后台任务及其子进程。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "description": "run_command 后台返回的任务 id（job-xxxx）" }
+            },
+            "required": ["id"]
           }
         }
       },
@@ -234,6 +264,7 @@ pub fn read_only_tool_names() -> Vec<&'static str> {
         "web_search",
         "web_extract",
         "search_sessions",
+        "command_status",
     ]
 }
 
@@ -258,6 +289,8 @@ pub fn is_parallelizable_tool(name: &str) -> bool {
             | "web_search"
             | "web_extract"
             | "search_sessions"
+            | "command_status"
+            | "command_kill"
     )
 }
 
@@ -286,10 +319,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_agent_tool_definitions_returns_15_tools() {
+    fn test_agent_tool_definitions_returns_17_tools() {
         let defs = agent_tool_definitions();
         let arr = defs.as_array().unwrap();
-        assert_eq!(arr.len(), 15);
+        assert_eq!(arr.len(), 17);
     }
 
     #[test]
@@ -317,14 +350,16 @@ mod tests {
             "web_extract",
             "memory_write",
             "search_sessions",
+            "command_status",
+            "command_kill",
         ] {
             assert!(names.contains(name), "missing tool: {}", name);
         }
     }
 
     #[test]
-    fn test_read_only_tool_names_returns_ten() {
-        assert_eq!(read_only_tool_names().len(), 10);
+    fn test_read_only_tool_names_returns_eleven() {
+        assert_eq!(read_only_tool_names().len(), 11);
     }
 
     #[test]
@@ -341,11 +376,13 @@ mod tests {
             "web_search",
             "web_extract",
             "search_sessions",
+            "command_status",
         ] {
             assert!(names.contains(name));
         }
         assert!(!names.contains(&"write_file"));
         assert!(!names.contains(&"memory_write"));
+        assert!(!names.contains(&"command_kill"));
     }
 
     #[test]
@@ -391,6 +428,8 @@ mod tests {
         assert!(is_parallelizable_tool("list_dir"));
         assert!(is_parallelizable_tool("web_search"));
         assert!(is_parallelizable_tool("search_sessions"));
+        assert!(is_parallelizable_tool("command_status"));
+        assert!(is_parallelizable_tool("command_kill"));
         assert!(!is_parallelizable_tool("read_file"));
         assert!(!is_parallelizable_tool("grep"));
         assert!(!is_parallelizable_tool("write_file"));

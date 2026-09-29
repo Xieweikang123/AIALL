@@ -1,6 +1,7 @@
 mod agent_git_tools;
 mod agent_regression;
 mod ambiguous_term;
+mod background_jobs;
 mod checkpoint;
 mod classifier;
 mod consultative_topics;

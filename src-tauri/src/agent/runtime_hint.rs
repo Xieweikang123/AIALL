@@ -131,6 +131,14 @@ pub fn build_shell_awareness_hint() -> &'static str {
     }
 }
 
+/// 长任务后台化（机制契约）：避免前台 120s 超时把整轮卡死。
+pub fn build_background_command_hint() -> &'static str {
+    "长任务（测试/构建/安装/dev server 等可能超过 30s 的命令）：用 run_command 设 background=true，\
+立即拿到任务 id，本轮可继续其它工作；随后用 command_status(id=...) 查状态与日志尾部，\
+必要时 command_kill(id=...) 终止。禁止用前台 run_command 长时间忙等，也禁止用 `| Select-Object -Last` 这类\
+要等命令结束才吐输出的管道过滤器来伪装后台。后台任务未确认结果前不得宣称完成。"
+}
+
 pub fn resolve_verify_scripts(scripts: &[String]) -> Vec<&str> {
     let default_order: &[&str] = &[
         "npm run typecheck",
@@ -165,6 +173,14 @@ mod tests {
     fn test_build_shell_awareness_hint_not_empty() {
         let hint = build_shell_awareness_hint();
         assert!(!hint.is_empty());
+    }
+
+    #[test]
+    fn test_build_background_command_hint_mentions_tools() {
+        let hint = build_background_command_hint();
+        assert!(hint.contains("background=true"));
+        assert!(hint.contains("command_status"));
+        assert!(hint.contains("command_kill"));
     }
 
     // ── build_runtime_awareness_hint ──

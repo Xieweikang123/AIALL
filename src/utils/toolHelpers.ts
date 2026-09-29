@@ -13,6 +13,8 @@ export function getToolIcon(name: string): string {
   if (name === 'git_status' || name === 'git_diff') return '⎇';
   if (name === 'delete_file') return '🗑️';
   if (name === 'run_command') return '▶️';
+  if (name === 'command_status') return '⏱️';
+  if (name === 'command_kill') return '⏹️';
   if (name === 'web_search' || name === 'web_extract') return '🌐';
   if (name === 'memory_write') return '🧠';
   if (name === 'search_sessions') return '🕘';
@@ -38,6 +40,8 @@ export function getToolLabel(name: string): string {
   if (name === 'git_diff') return 'Git diff';
   if (name === 'delete_file') return '删除';
   if (name === 'run_command') return '执行';
+  if (name === 'command_status') return '后台状态';
+  if (name === 'command_kill') return '终止任务';
   if (name === 'web_search') return '联网搜索';
   if (name === 'web_extract') return '抓取网页';
   if (name === 'memory_write') return '写入记忆';
@@ -58,6 +62,8 @@ export function getToolCommand(name: string): string {
   if (name === 'git_diff') return 'git diff';
   if (name === 'delete_file') return 'rm';
   if (name === 'run_command') return 'exec';
+  if (name === 'command_status') return 'bg-status';
+  if (name === 'command_kill') return 'bg-kill';
   if (name === 'web_search') return 'web';
   if (name === 'web_extract') return 'fetch';
   if (name === 'memory_write') return 'mem';
