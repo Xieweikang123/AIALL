@@ -50,7 +50,9 @@ import {
 import {
   persistAgentRunForHmr,
   popPendingAgentRun,
+  peekPendingAgentRun,
   clearPendingAgentRun,
+  pendingRunBelongsToSession,
 } from "../services/agentHmrRecovery";
 import { compressImageDataUrlsForAgent } from "../services/imageCompress";
 import { resolveImagesForAgentTurn } from "../services/vibeChatImageStore";
@@ -926,6 +928,13 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     interruptAgentRun({ reason: "已手动停止" });
   }
 
+  /**
+   * HMR/刷新重挂后，尝试自动恢复被中断的 Agent 运行。
+   *
+   * 顺序：先在**当前会话**里找 HMR 中断且有进度的 assistant；找不到再看全局待恢复记录
+   * （`vibe-agent-hmr-pending`）。后者必须校验会话归属——待恢复运行属于别的会话时直接丢弃，
+   * 否则会把别的会话的任务注入当前会话（历史 bug：会话 A 的「暂停按钮」任务跑到会话 B）。
+   */
   function tryResumeHmrInterruptedRun(): void {
     if (runManager.size() > 0 || chatSending.value) return;
     if (!configReady.value || !projectOpened.value) return;
@@ -943,9 +952,19 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       return;
     }
 
-    const pending = popPendingAgentRun();
+    const pending = peekPendingAgentRun();
     if (!pending) return;
     if (pending.projectPath && pending.projectPath !== currentProject) return;
+    // 会话归属校验：pending 属于别的会话时，禁止把它注入当前会话。
+    // 否则会话 A 的任务会在会话 B 里被新开一轮（HMR 重挂后「别的会话串进来」）。
+    // 注意：这里只 peek 不消费——保留记录，等用户切回目标会话时再恢复，不能当场销毁。
+    if (!pendingRunBelongsToSession(pending.sessionId, activeSessionId.value)) {
+      debugLog(
+        `[resume] skip pending run from another session: pending=${pending.sessionId}, active=${activeSessionId.value}`,
+      );
+      return;
+    }
+    popPendingAgentRun();
     const prompt = (pending.request?.prompt as string) || "";
     const storedImages = Array.isArray(pending.request?.imageDataUrls)
       ? (pending.request.imageDataUrls as string[]).filter(Boolean)

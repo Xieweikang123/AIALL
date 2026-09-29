@@ -7,6 +7,7 @@ import {
   resolveAgentResumeRunProfile,
   resolveAgentRunProfile,
   resolveAskExecutionEscalation,
+  stripInjectedContinuationHints,
 } from "./agentRunProfile";
 
 const SAMPLE_PLAN = [
@@ -303,6 +304,20 @@ describe("enrichAgentUserPrompt execution continuation", () => {
     });
     expect(hint).toContain("【续跑确认】");
     expect(hint).toContain("禁止写「看到截图");
+  });
+
+  it("does not stack the continuation hint when re-enriching an already enriched prompt", () => {
+    const enriched = enrichAgentUserPrompt("改吧", { hasImages: false });
+    const twice = enrichAgentUserPrompt(enriched, { hasImages: false });
+    expect(twice.match(/【续跑确认】/g)?.length).toBe(1);
+  });
+
+  it("strips previously injected continuation hint lines", () => {
+    const stripped = stripInjectedContinuationHints(
+      "改吧\n\n【续跑确认】本条消息无附图；禁止写「看到截图/如图所示」等读图开场，直接基于上一轮方案执行。",
+    );
+    expect(stripped).toBe("改吧");
+    expect(stripped).not.toContain("【续跑确认】");
   });
 });
 

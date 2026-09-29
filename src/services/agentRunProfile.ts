@@ -145,13 +145,15 @@ export function enrichAgentUserPrompt(
   prompt: string,
   options?: { lastAssistantContent?: string; hasImages?: boolean },
 ): string {
-  let enriched = buildUiScopeFollowUpHint(prompt, options?.lastAssistantContent);
+  // 幂等：先剥掉可能已存在的注入行，避免 HMR 恢复时叠加成两遍（见 stripInjectedContinuationHints）。
+  const base = stripInjectedContinuationHints(prompt);
+  let enriched = buildUiScopeFollowUpHint(base, options?.lastAssistantContent);
   enriched = buildImmediateTopicFollowUpHint(
     enriched,
     options?.lastAssistantContent,
-    prompt,
+    base,
   );
-  if (!options?.hasImages && isExecutionContinuation(prompt.trim())) {
+  if (!options?.hasImages && isExecutionContinuation(base.trim())) {
     enriched = [
       enriched,
       "",
@@ -159,6 +161,24 @@ export function enrichAgentUserPrompt(
     ].join("\n");
   }
   return enriched;
+}
+
+const INJECTED_HINT_LINE_RE = /^【续跑确认】本条消息无附图/;
+
+/**
+ * 去掉先前 `enrichAgentUserPrompt` 注入的续跑确认行。
+ *
+ * HMR 待恢复的 prompt 可能是富化过的（正常发送路径把 `agentRequest.prompt` 原样存盘），
+ * 恢复时若再走一遍 `enrichAgentUserPrompt`，注入行会叠加成两遍。恢复前先剥掉，保证只注入一次。
+ */
+export function stripInjectedContinuationHints(prompt: string): string {
+  if (!prompt) return prompt;
+  return prompt
+    .split("\n")
+    .filter((line) => !INJECTED_HINT_LINE_RE.test(line.trim()))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 export function buildAgentPromptForProfile(prompt: string, profile: AgentRunProfile): string {
