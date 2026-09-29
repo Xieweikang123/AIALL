@@ -149,43 +149,104 @@
   cursor: not-allowed;
 }
 
-/* ── Shimmer: 单层斜向扫光（加载态唯一动效）────────────── */
+/* ── Shimmer: 加载态炫光（光刃 + 底色呼吸 + 外发光脉冲）────── */
 .git-remote-btn--loading {
   overflow: hidden;
+  /* 按钮本体：蓝调辉光脉冲 */
+  animation: remote-btn-glow 1.15s ease-in-out infinite;
 }
 
+/* 底色呼吸：顶部径向光晕随光刃同步明灭 */
+.git-remote-btn--loading::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    120% 150% at 50% 0%,
+    rgba(88, 166, 255, 0.32) 0%,
+    rgba(88, 166, 255, 0.08) 45%,
+    transparent 72%
+  );
+  animation: remote-btn-glow-fade 1.15s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* 光刃：更亮更宽、带模糊辉光，扫得更快 */
 .git-remote-btn--loading::after {
   content: '';
   position: absolute;
-  top: 0;
+  top: -25%;
   left: 0;
-  width: 40%;
-  height: 100%;
+  width: 55%;
+  height: 150%;
   background: linear-gradient(
     110deg,
     transparent 0%,
-    rgba(255, 255, 255, 0.28) 50%,
+    rgba(255, 255, 255, 0.95) 50%,
     transparent 100%
   );
+  filter: blur(1px);
+  box-shadow: 0 0 14px rgba(120, 200, 255, 0.8);
   transform: translateX(-160%);
-  animation: remote-btn-shimmer 1.6s ease-in-out infinite;
+  animation: remote-btn-shimmer 1.05s linear infinite;
   pointer-events: none;
 }
 
 @keyframes remote-btn-shimmer {
   0%   { transform: translateX(-160%); }
-  60%  { transform: translateX(360%); }
+  70%  { transform: translateX(360%); }
   100% { transform: translateX(360%); }
 }
 
-/* Push 加载态：扫光换成绿色调 */
+@keyframes remote-btn-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 rgba(88, 166, 255, 0);
+  }
+  50% {
+    box-shadow:
+      0 0 14px rgba(88, 166, 255, 0.6),
+      inset 0 0 10px rgba(88, 166, 255, 0.3);
+  }
+}
+
+@keyframes remote-btn-glow-fade {
+  0%, 100% { opacity: 0.2; }
+  50%      { opacity: 0.85; }
+}
+
+/* Push 加载态：整条链换绿色调 */
+.git-remote-btn--push--loading {
+  animation: remote-btn-glow-green 1.15s ease-in-out infinite;
+}
+
+.git-remote-btn--push--loading::before {
+  background: radial-gradient(
+    120% 150% at 50% 0%,
+    rgba(63, 185, 80, 0.36) 0%,
+    rgba(63, 185, 80, 0.1) 45%,
+    transparent 72%
+  );
+}
+
 .git-remote-btn--push--loading::after {
   background: linear-gradient(
     110deg,
     transparent 0%,
-    rgba(63, 185, 80, 0.35) 50%,
+    rgba(63, 185, 80, 0.95) 50%,
     transparent 100%
   );
+  box-shadow: 0 0 14px rgba(86, 211, 100, 0.85);
+}
+
+@keyframes remote-btn-glow-green {
+  0%, 100% {
+    box-shadow: 0 0 0 rgba(63, 185, 80, 0);
+  }
+  50% {
+    box-shadow:
+      0 0 14px rgba(63, 185, 80, 0.65),
+      inset 0 0 10px rgba(63, 185, 80, 0.32);
+  }
 }
 
 .git-remote-btn--push {
