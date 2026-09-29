@@ -338,6 +338,11 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
     const sourceFiles = gitBatchSourceFiles.value;
     if (aiBatchGroupsResult.value) {
       const sourcePathSet = new Set(sourceFiles.map((f) => f.path.replace(/\\/g, "/")));
+      // Analysis streams groups before the git status is stable, and a refresh can
+      // briefly report no files mid-analysis (watcher/refresh race). An empty source
+      // list is never authoritative here — it would wipe every group. Treat both as
+      // transient: keep the groups until the status settles, then prune normally.
+      const skipPrune = aiBatchGrouping.value || sourceFiles.length === 0;
       const groups = aiBatchGroupsResult.value
         .map((g) => ({
           dir: g.name,
@@ -345,7 +350,7 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
             // 丢弃已从 git 状态消失的路径，避免渲染过期文件、也避免兜底状态假报 M；
             // 比较用正斜杠归一化，输出优先用 git 原始 path，保证下游 stage / 提交匹配一致。
             .map((p) => ({ raw: p, norm: p.replace(/\\/g, "/") }))
-            .filter(({ norm }) => sourcePathSet.has(norm))
+            .filter(({ norm }) => skipPrune || sourcePathSet.has(norm))
             .map(({ raw, norm }) => {
               const orig = sourceFiles.find((uf) => uf.path.replace(/\\/g, "/") === norm);
               return { path: orig?.path ?? raw, status: orig?.status || "modified" };
